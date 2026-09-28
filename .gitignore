@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+app_log.txt
+out_*/
+.venv/

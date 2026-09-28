@@ -1,0 +1,4 @@
+torch>=2.2          # install the CUDA build from https://pytorch.org for GPU training
+flask>=3.0
+transformers>=4.40  # only for the BLIP image-captioning model in the web app
+pillow>=10.0

@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Talk to Jo</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f4ee;
+    --surface: #ffffff;
+    --surface-2: #efeae0;
+    --text: #1f1b16;
+    --muted: #6b6258;
+    --border: #ddd5c8;
+    --accent: #8a3b2b;
+    --accent-text: #ffffff;
+    --warn: #9a5b00;
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16130f;
+      --surface: #201c17;
+      --surface-2: #2a251f;
+      --text: #ece6dc;
+      --muted: #a39a8e;
+      --border: #3a332b;
+      --accent: #e08a6f;
+      --accent-text: #1a1310;
+      --warn: #e0a84a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    padding: 14px max(16px, calc((100% - 820px) / 2));
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0; font: 600 1.5rem/1 Georgia, "Times New Roman", serif; }
+  #status { color: var(--muted); font-size: .875rem; }
+  #status.bad { color: var(--warn); }
+
+  main { overflow-y: auto; padding: 24px max(16px, calc((100% - 820px) / 2)); }
+  .empty { color: var(--muted); text-align: center; margin-top: 12vh; }
+  .empty p { max-width: 46ch; margin: 8px auto; }
+  .empty strong { font-family: Georgia, serif; font-size: 1.25rem; color: var(--text); }
+
+  .msg { margin: 0 0 20px; }
+  .msg.user { display: flex; flex-direction: column; align-items: flex-end; }
+  .bubble {
+    background: var(--surface-2); border-radius: var(--radius);
+    padding: 10px 14px; max-width: 85%; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .attachments { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-bottom: 6px; }
+  .attachments img { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
+    padding: 4px 10px; font-size: .8125rem;
+  }
+
+  .msg.jo .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .who { font: 600 .8125rem/1 system-ui, sans-serif; color: var(--accent); margin-bottom: 8px; letter-spacing: .02em; }
+  .notes { display: grid; gap: 4px; margin-bottom: 10px; font-size: .875rem; color: var(--muted); }
+  .notes .warn { color: var(--warn); }
+  .notes q { color: var(--text); font-style: italic; }
+  details.seen { font-size: .8125rem; color: var(--muted); margin-bottom: 10px; }
+  details.seen summary { cursor: pointer; }
+  details.seen pre { white-space: pre-wrap; background: var(--surface-2); padding: 8px 10px; border-radius: 8px; margin: 6px 0 0; color: var(--text); }
+  .out { font: 1.0625rem/1.6 Georgia, "Times New Roman", serif; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .out .p { color: var(--muted); }
+  .out.busy::after { content: "▍"; color: var(--accent); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .out.busy::after { animation: none; } }
+
+  footer { padding: 12px max(16px, calc((100% - 820px) / 2)) 16px; border-top: 1px solid var(--border); background: var(--bg); }
+  #pending { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  #pending:empty { display: none; }
+  #pending .chip img { width: 28px; height: 28px; object-fit: cover; border-radius: 6px; }
+  #pending .chip button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 2px; }
+
+  form.composer {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: end;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px;
+  }
+  form.composer:focus-within { border-color: var(--accent); }
+  textarea {
+    field-sizing: content; min-height: 2.5rem; max-height: 12rem; resize: none;
+    border: 0; outline: none; background: transparent; color: inherit; font: inherit; padding: 8px 4px;
+  }
+  @supports not (field-sizing: content) { textarea { height: 2.75rem; } }
+  .icon-btn, .send {
+    height: 40px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2);
+    color: var(--text); cursor: pointer; font: inherit; padding: 0 12px;
+  }
+  .icon-btn { width: 40px; padding: 0; font-size: 1.25rem; }
+  .send { background: var(--accent); color: var(--accent-text); border-color: transparent; font-weight: 600; }
+  .send:disabled { opacity: .5; cursor: default; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  details.settings { margin-top: 8px; font-size: .875rem; color: var(--muted); }
+  details.settings summary { cursor: pointer; width: fit-content; }
+  .sliders { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px 20px; margin-top: 10px; }
+  .sliders label { display: grid; gap: 4px; }
+  .sliders span { display: flex; justify-content: space-between; }
+  .sliders output { color: var(--text); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+
+  #drop {
+    position: fixed; inset: 0; display: none; place-items: center; z-index: 10;
+    background: color-mix(in srgb, var(--bg) 85%, transparent);
+    border: 3px dashed var(--accent); font: 600 1.25rem Georgia, serif; color: var(--accent);
+  }
+  body.dragging #drop { display: grid; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Jo</h1>
+  <span id="status">connecting…</span>
+</header>
+
+<main id="log" aria-live="polite">
+  <div class="empty" id="empty">
+    <strong>Jo writes like Shakespeare.</strong>
+    <p>Type the start of a scene, like <em>ROMEO:</em>, and Jo will continue it. You can also attach images, which a vision model describes in words for Jo, or text files, which Jo continues from.</p>
+    <p>Drag files anywhere onto the page, or use the paperclip.</p>
+  </div>
+</main>
+
+<footer>
+  <div id="pending"></div>
+  <form class="composer" id="form">
+    <label class="icon-btn" title="Attach images or text files" style="display:grid;place-items:center">
+      📎<span class="sr-only">Attach files</span>
+      <input type="file" id="file" multiple hidden
+             accept="image/*,.txt,.md,.csv,.json,.py,.js,.html,.css,.log">
+    </label>
+    <textarea id="prompt" rows="1" placeholder="ROMEO:" aria-label="Prompt for Jo"></textarea>
+    <button class="send" id="send" type="submit">Send</button>
+  </form>
+  <details class="settings">
+    <summary>Generation settings</summary>
+    <div class="sliders">
+      <label><span>Length (characters) <output id="o-tokens">400</output></span>
+        <input type="range" id="tokens" min="50" max="2000" step="50" value="400"></label>
+      <label><span>Temperature <output id="o-temperature">0.8</output></span>
+        <input type="range" id="temperature" min="0.1" max="1.5" step="0.05" value="0.8"></label>
+      <label><span>Top-k <output id="o-top_k">40</output></span>
+        <input type="range" id="top_k" min="1" max="65" step="1" value="40"></label>
+    </div>
+  </details>
+</footer>
+
+<div id="drop" aria-hidden="true">Drop images or text files for Jo</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = $("log"), form = $("form"), promptEl = $("prompt"), sendBtn = $("send"), pendingEl = $("pending");
+let pending = [];   // File objects waiting to be sent
+let busy = false;
+
+// ---------- status ----------
+async function refreshStatus() {
+  try {
+    const r = await fetch("/api/status");
+    const s = await r.json();
+    const el = $("status");
+    if (!s.ok) { el.textContent = s.error; el.className = "bad"; return; }
+    el.className = "";
+    el.textContent = `${s.params_m}M parameters · trained ${s.iter} steps · val loss ${s.val_loss.toFixed(3)} · ${s.device}`;
+  } catch { $("status").textContent = "server offline"; $("status").className = "bad"; }
+}
+refreshStatus();
+setInterval(refreshStatus, 30000);  // picks up newer checkpoints while training runs
+
+// ---------- settings ----------
+for (const id of ["tokens", "temperature", "top_k"]) {
+  const input = $(id), out = $("o-" + id);
+  input.addEventListener("input", () => { out.textContent = input.value; });
+}
+
+// ---------- attachments ----------
+const isImage = (f) => f.type.startsWith("image/");
+
+function addFiles(list) {
+  for (const f of list) pending.push(f);
+  renderPending();
+}
+
+function renderPending() {
+  pendingEl.replaceChildren(...pending.map((f, i) => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    if (isImage(f)) {
+      const img = document.createElement("img");
+      img.src = URL.createObjectURL(f); img.alt = "";
+      chip.append(img);
+    } else chip.append("📄");
+    chip.append(f.name);
+    const x = document.createElement("button");
+    x.type = "button"; x.textContent = "×"; x.setAttribute("aria-label", `Remove ${f.name}`);
+    x.onclick = () => { pending.splice(i, 1); renderPending(); };
+    chip.append(x);
+    return chip;
+  }));
+}
+
+$("file").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
+
+let dragDepth = 0;
+addEventListener("dragenter", (e) => { if (e.dataTransfer?.types.includes("Files")) { dragDepth++; document.body.classList.add("dragging"); } });
+addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); } });
+addEventListener("dragover", (e) => e.preventDefault());
+addEventListener("drop", (e) => {
+  e.preventDefault(); dragDepth = 0; document.body.classList.remove("dragging");
+  if (e.dataTransfer?.files.length) addFiles(e.dataTransfer.files);
+});
+promptEl.addEventListener("paste", (e) => {
+  const files = [...e.clipboardData.files];
+  if (files.length) { e.preventDefault(); addFiles(files); }
+});
+
+// ---------- sending ----------
+// Enter sends, Shift+Enter adds a newline; skip while an IME is composing text.
+promptEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.shiftKey) return;
+  if (e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  form.requestSubmit();
+});
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (busy) return;
+  const text = promptEl.value;
+  const files = pending;
+  if (!text.trim() && !files.length) { promptEl.focus(); return; }
+
+  $("empty")?.remove();
+  addUserMessage(text, files);
+  const jo = addJoMessage();
+  promptEl.value = ""; pending = []; renderPending();
+  setBusy(true);
+
+  const body = new FormData();
+  body.append("prompt", text);
+  for (const id of ["tokens", "temperature", "top_k"]) body.append(id, $(id).value);
+  for (const f of files) body.append("files", f, f.name);
+
+  try {
+    const res = await fetch("/api/generate", { method: "POST", body });
+    if (!res.ok) throw new Error(`Server error ${res.status}`);
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+        if (line) handleEvent(jo, JSON.parse(line));
+      }
+    }
+  } catch (err) {
+    note(jo, `Something went wrong: ${err.message}`, true);
+  } finally {
+    jo.out.classList.remove("busy");
+    setBusy(false);
+    promptEl.focus();
+  }
+});
+
+function setBusy(b) { busy = b; sendBtn.disabled = b; sendBtn.textContent = b ? "Writing…" : "Send"; }
+
+function handleEvent(jo, ev) {
+  switch (ev.type) {
+    case "status": jo.status.textContent = ev.message; break;
+    case "caption": {
+      const row = document.createElement("div");
+      row.append(`🖼 ${ev.file}, the vision model sees: `);
+      const q = document.createElement("q"); q.textContent = ev.caption; row.append(q);
+      jo.notes.append(row); jo.status.textContent = ""; break;
+    }
+    case "file": note(jo, `📄 Read ${ev.file} (${ev.chars.toLocaleString()} characters)`); break;
+    case "warning": note(jo, `⚠ ${ev.message}`, true); break;
+    case "error": note(jo, ev.message, true); break;
+    case "prompt": {
+      jo.status.textContent = "";
+      const d = document.createElement("details"); d.className = "seen";
+      const extra = [ev.truncated && "cut to the last 256 characters", ev.dropped > 0 && `${ev.dropped} unknown characters removed`].filter(Boolean);
+      d.innerHTML = `<summary>What Jo actually saw${extra.length ? " (" + extra.join(", ") + ")" : ""}</summary><pre></pre>`;
+      d.querySelector("pre").textContent = ev.text;
+      jo.card.insertBefore(d, jo.out);
+      const p = document.createElement("span"); p.className = "p"; p.textContent = ev.text.trim() ? ev.text : "";
+      jo.out.append(p);
+      break;
+    }
+    case "token": jo.out.append(ev.text); scrollDown(); break;
+  }
+}
+
+function note(jo, text, warn = false) {
+  const row = document.createElement("div");
+  if (warn) row.className = "warn";
+  row.textContent = text; jo.notes.append(row); jo.status.textContent = "";
+}
+
+function addUserMessage(text, files) {
+  const msg = document.createElement("div"); msg.className = "msg user";
+  if (files.length) {
+    const att = document.createElement("div"); att.className = "attachments";
+    for (const f of files) {
+      if (isImage(f)) { const img = document.createElement("img"); img.src = URL.createObjectURL(f); img.alt = f.name; att.append(img); }
+      else { const c = document.createElement("span"); c.className = "chip"; c.textContent = "📄 " + f.name; att.append(c); }
+    }
+    msg.append(att);
+  }
+  if (text.trim()) { const b = document.createElement("div"); b.className = "bubble"; b.textContent = text; msg.append(b); }
+  log.append(msg); scrollDown(true);
+}
+
+function addJoMessage() {
+  const msg = document.createElement("div"); msg.className = "msg jo";
+  const card = document.createElement("div"); card.className = "card";
+  const who = document.createElement("div"); who.className = "who"; who.textContent = "JO";
+  const notes = document.createElement("div"); notes.className = "notes";
+  const status = document.createElement("div"); notes.append(status);
+  const out = document.createElement("div"); out.className = "out busy";
+  card.append(who, notes, out); msg.append(card); log.append(msg); scrollDown(true);
+  return { card, notes, status, out };
+}
+
+function scrollDown(force = false) {
+  const nearBottom = force || log.scrollHeight - log.scrollTop - log.clientHeight < 120;
+  if (nearBottom) log.scrollTop = log.scrollHeight;
+}
+</script>
+</body>
+</html>

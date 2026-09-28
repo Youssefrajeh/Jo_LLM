@@ -1,0 +1,24 @@
+1,115,394 chars | vocab 65 | train 1,003,854 | val 111,540 tokens
+Jo: 10.77M parameters on cuda (bf16)
+step     0 | train loss 4.3036 | val loss 4.2996 | 7s
+step   250 | train loss 1.9345 | val loss 2.0489 | 43s
+step   500 | train loss 1.5281 | val loss 1.7136 | 79s
+step   750 | train loss 1.3584 | val loss 1.5818 | 114s
+step  1000 | train loss 1.2646 | val loss 1.5132 | 149s
+step  1250 | train loss 1.1964 | val loss 1.4851 | 185s
+step  1500 | train loss 1.1378 | val loss 1.4751 | 221s
+step  1750 | train loss 1.0871 | val loss 1.4597 | 256s
+step  2000 | train loss 1.0394 | val loss 1.4805 | 292s
+step  2250 | train loss 0.9916 | val loss 1.4894 | 329s
+step  2500 | train loss 0.9409 | val loss 1.5118 | 365s
+step  2750 | train loss 0.8889 | val loss 1.5161 | 401s
+step  3000 | train loss 0.8387 | val loss 1.5447 | 437s
+step  3250 | train loss 0.7950 | val loss 1.5702 | 472s
+step  3500 | train loss 0.7473 | val loss 1.6005 | 508s
+step  3750 | train loss 0.7092 | val loss 1.6267 | 544s
+step  4000 | train loss 0.6747 | val loss 1.6427 | 581s
+step  4250 | train loss 0.6447 | val loss 1.6730 | 618s
+step  4500 | train loss 0.6177 | val loss 1.6840 | 654s
+step  4750 | train loss 0.6005 | val loss 1.7174 | 693s
+step  5000 | train loss 0.5843 | val loss 1.7244 | 729s
+done. best val loss 1.4597. checkpoint: out/ckpt.pt

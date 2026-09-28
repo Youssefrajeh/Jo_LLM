@@ -1,4 +1,6 @@
 torch>=2.2          # install the CUDA build from https://pytorch.org for GPU training
 flask>=3.0
-transformers>=4.40  # only for the BLIP image-captioning model in the web app
+transformers>=4.40  # BLIP captioning, the code model and the notes models
 pillow>=10.0
+peft>=0.11          # LoRA fine-tuning for code_style.py
+accelerate>=0.30

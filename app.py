@@ -1,9 +1,16 @@
 """
-Web app for talking to Jo.
+Web app for talking to Jo, plus two private assistants.
 
     python app.py        then open http://127.0.0.1:5000
 
-How a request flows:
+Three modes (tabs at the top of the page):
+    Shakespeare  /api/generate  Jo, the model trained from scratch (below)
+    My code      /api/code      Qwen2.5-Coder fine-tuned on your code with LoRA (code_style.py)
+    My notes     /api/ask       answers from private/notes via RAG (notes_rag.py)
+
+Environment variables: JO_OUT_DIR (Jo checkpoint folder), JO_NOTES_DIR (notes folder), JO_PORT.
+
+How a Shakespeare request flows:
     typed text ─────────────────────────────┐
     text files (.txt, .md, ...) → contents ─┼─► one prompt ─► Jo ─► streamed text
     images → BLIP (vision model) → caption ─┘
@@ -152,5 +159,90 @@ def generate():
     return Response(stream_with_context(events()), mimetype="application/x-ndjson")
 
 
+# ---------------- "My code": style-tuned code model (code_style.py) ----------------
+NOTES_DIR = os.environ.get("JO_NOTES_DIR", os.path.join("private", "notes"))
+coder = {"model": None, "tok": None}
+
+
+def free_gpu(keep):
+    """The 6 GB laptop GPU can't comfortably hold every model, so unload the big ones we're not using."""
+    import notes_rag
+    if keep != "coder" and coder["model"] is not None:
+        coder.update(model=None, tok=None)
+    if keep != "notes":
+        notes_rag._models.pop("chat", None)
+    if device == "cuda":
+        torch.cuda.empty_cache()
+
+
+def ndjson(gen):
+    return Response(stream_with_context((json.dumps(e) + "\n" for e in gen)), mimetype="application/x-ndjson")
+
+
+@app.post("/api/code")
+def code():
+    import code_style
+    prompt = request.form.get("prompt", "")
+    tokens = max(16, min(int(request.form.get("tokens", 200)), 1024))
+    temperature = max(0.0, min(float(request.form.get("temperature", 0.4)), 1.5))
+    use_adapter = request.form.get("base") != "1"
+
+    def events():
+        if not os.path.isdir(code_style.ADAPTER_DIR):
+            yield dict(type="error", message="No style adapter yet. Train one: "
+                                             "python code_style.py train --code_dir \"path\\to\\your\\code\"")
+            return
+        with gpu_lock:
+            if coder["model"] is None:
+                yield dict(type="status", message="Loading the code model…")
+                free_gpu("coder")
+                coder["model"], coder["tok"], _ = code_style.load_model()
+            yield dict(type="status", message="")
+            for piece in code_style.complete_stream(coder["model"], coder["tok"], device, prompt,
+                                                    tokens, temperature, use_adapter):
+                yield dict(type="token", text=piece)
+        yield dict(type="done")
+
+    return ndjson(events())
+
+
+# ---------------- "My notes": private RAG over private/notes (notes_rag.py) ----------------
+@app.post("/api/ask")
+def ask():
+    import notes_rag
+    question = request.form.get("prompt", "").strip()
+    k = max(1, min(int(request.form.get("k", 4)), 10))
+
+    def events():
+        if not os.path.isdir(NOTES_DIR) or not notes_rag.note_files(NOTES_DIR):
+            yield dict(type="error", message=f"No notes found. Put .txt or .md files in {NOTES_DIR}.")
+            return
+        with gpu_lock:
+            yield dict(type="status", message="Searching your notes…")
+            hits, rebuilt, index = notes_rag.ask(question, NOTES_DIR, k)
+            if rebuilt:
+                yield dict(type="info", message=f"Re-indexed {len(index['files'])} notes ({len(index['chunks'])} chunks).")
+            yield dict(type="sources", hits=hits)
+            if notes_rag._models.get("chat") is None:
+                yield dict(type="status", message="Loading the answer model…")
+                free_gpu("notes")
+            yield dict(type="status", message="")
+            for piece in notes_rag.answer_stream(question, hits):
+                yield dict(type="token", text=piece)
+        yield dict(type="done")
+
+    return ndjson(events())
+
+
+@app.get("/api/modes")
+def modes():
+    import code_style
+    import notes_rag
+    meta_path = os.path.join(code_style.ADAPTER_DIR, "jo_meta.json")
+    meta = json.load(open(meta_path)) if os.path.exists(meta_path) else None
+    n_notes = len(notes_rag.note_files(NOTES_DIR)) if os.path.isdir(NOTES_DIR) else 0
+    return jsonify(code=meta, notes={"dir": NOTES_DIR, "files": n_notes})
+
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, threaded=True)
+    app.run(host="127.0.0.1", port=int(os.environ.get("JO_PORT", 5000)), threaded=True)

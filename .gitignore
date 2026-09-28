@@ -3,3 +3,7 @@ __pycache__/
 app_log.txt
 out_*/
 .venv/
+
+# ---- personal data: NEVER commit ----
+# your notes, your code dataset, the RAG index and the style adapter all live here
+private/

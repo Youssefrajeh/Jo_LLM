@@ -2,6 +2,8 @@
 
 A small GPT-style language model implemented from scratch in PyTorch, trained on the works of Shakespeare, and served through a local web interface that accepts text, text files, and images.
 
+The project also includes two private, fully local assistants that illustrate how pretrained models are adapted to personal data: a code model fine-tuned on your own code with LoRA, and a retrieval-augmented (RAG) assistant that answers questions from your notes.
+
 | | |
 |---|---|
 | Parameters | 10.8 million |
@@ -127,6 +129,43 @@ flowchart LR
 
 This pipeline is the simplest way to extend a text model to images. Production multimodal models instead project image features directly into the language model's embedding space.
 
+## Personal Assistants
+
+Both assistants run entirely on the local machine and are available as tabs in the web interface ("My code" and "My notes"). All personal data, and anything derived from it, is stored in `private/`, which is excluded from version control.
+
+### Coding style (LoRA fine-tuning)
+
+`code_style.py` adapts [Qwen2.5-Coder-0.5B](https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B) to a user's own code. Training a small model such as Jo on code would reproduce its surface form without producing working programs, so this uses transfer learning from a pretrained code model instead. [LoRA](https://arxiv.org/abs/2106.09685) freezes the base weights and trains low-rank updates to each attention and MLP projection (8.8M trainable parameters, 1.7% of the model), which fits in 6 GB of GPU memory with bfloat16 and gradient checkpointing.
+
+```bash
+python code_style.py train --code_dir "path/to/your/projects"
+python code_style.py complete --prompt "def load_users(path):" --compare
+```
+
+The collector skips dependency folders, build output, minified files, and credential files such as `.env`. The `--compare` flag prints the base model's completion alongside the fine-tuned one.
+
+### Notes (retrieval-augmented generation)
+
+`notes_rag.py` answers questions from `.txt` and `.md` files in `private/notes/`. Facts are not trained into model weights, where they would be recalled unreliably and could not be removed. Instead, notes are split into chunks, embedded with [bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5), retrieved by cosine similarity, and passed to [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) with instructions to answer only from the retrieved text.
+
+```mermaid
+flowchart LR
+    N[Notes] --> C[Chunks] --> E[Embeddings]
+    Q[Question] --> QE[Query embedding]
+    QE --> S[Similarity search]
+    E --> S
+    S --> L[Instruction-tuned LLM]
+    Q --> L
+    L --> A[Answer with sources]
+```
+
+```bash
+python notes_rag.py ask "When is my dentist appointment?"
+python notes_rag.py ask "Which days do I go to the gym?" --notes_dir examples/notes
+```
+
+The index is rebuilt automatically when a note is added, edited, or deleted. Fictional sample notes are provided in `examples/notes/`. On these, the assistant answered every question whose answer was present correctly, and replied that the information was not in the notes when it was not.
+
 ## Limitations
 
 Jo models the surface statistics of its training text. It does not answer questions, follow instructions, or reason. The main differences from production language models are:
@@ -144,21 +183,27 @@ Jo_LLM/
 ├── tokenizer.py       Character-level tokenizer
 ├── train.py           Training loop
 ├── generate.py        Command-line text generation
-├── app.py             Flask server (Jo + BLIP, streaming responses)
+├── app.py             Flask server (Jo, BLIP, code and notes assistants; streaming)
 ├── static/index.html  Web interface
+├── code_style.py      LoRA fine-tuning of a code model on your code
+├── notes_rag.py       Retrieval-augmented question answering over your notes
+├── examples/notes/    Fictional sample notes
 ├── data/input.txt     Training data
 ├── out/               Trained checkpoint and vocabulary
 ├── train_log.txt      Training log
-└── EXPLANATION.md     Detailed walkthrough of every component
+├── EXPLANATION.md     Detailed walkthrough of every component
+└── private/           Your notes, index, and adapter (git-ignored)
 ```
 
-A step-by-step explanation of the tokenizer, attention mechanism, training procedure, and web application is available in [EXPLANATION.md](EXPLANATION.md).
+A step-by-step explanation of the tokenizer, attention mechanism, training procedure, web application, LoRA fine-tuning, and retrieval pipeline is available in [EXPLANATION.md](EXPLANATION.md).
 
 ## References
 
 - Vaswani et al., [Attention Is All You Need](https://arxiv.org/abs/1706.03762), 2017
 - Radford et al., [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf), 2019
 - Li et al., [BLIP: Bootstrapping Language-Image Pre-training](https://arxiv.org/abs/2201.12086), 2022
+- Hu et al., [LoRA: Low-Rank Adaptation of Large Language Models](https://arxiv.org/abs/2106.09685), 2021
+- Lewis et al., [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks](https://arxiv.org/abs/2005.11401), 2020
 - Karpathy, [nanoGPT](https://github.com/karpathy/nanoGPT)
 
 ## Author

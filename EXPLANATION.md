@@ -23,6 +23,10 @@ the difference is scale (GPT-3 has 175 **billion** parameters, ~16,000× more).
 | `static/index.html` | The web page for chatting with Jo |
 | `README.md` | Project front page for GitHub |
 | `requirements.txt` | Python packages needed |
+| `code_style.py` | Fine-tunes a pretrained code model on YOUR code with LoRA (section 5c) |
+| `notes_rag.py` | Answers questions from YOUR notes with retrieval (RAG) (section 5d) |
+| `examples/notes/` | Fictional sample notes for trying out the notes assistant |
+| `private/` | Your notes, the notes index and your code adapter. **Git-ignored, never pushed.** |
 
 ## 2. How to use it
 
@@ -32,6 +36,10 @@ python generate.py                    # write 500 characters
 python generate.py --prompt "ROMEO:" --tokens 800 --temperature 0.8
 python train.py --data my_file.txt    # train Jo on ANY text file instead
 python app.py                         # web page at http://127.0.0.1:5000
+
+python code_style.py train --code_dir "D:\path\to\your\projects"   # learn your coding style
+python code_style.py complete --prompt "def load_users(path):" --compare
+python notes_rag.py ask "When is my dentist appointment?"         # notes in private/notes/
 ```
 
 ---
@@ -252,6 +260,111 @@ stream and appends characters as they arrive, like ChatGPT's typing effect.
 **Other details:** a lock keeps one generation on the GPU at a time; the server
 reloads the checkpoint automatically if `train.py` saves a newer one; the page
 follows the system light/dark theme.
+
+---
+
+## 5c. Your coding style: LoRA fine-tuning (`code_style.py`)
+
+**Goal:** a model that completes code the way *you* write it.
+
+**Why not just train Jo on code?** Jo has 10.8M parameters and has never learned to
+program. Trained on your code, it would copy the *look* (indentation, names) but
+nothing it wrote would run. Instead we use **transfer learning**: start from
+`Qwen2.5-Coder-0.5B`, a 494M-parameter model already trained on billions of lines
+of code, and fine-tune it on yours. It keeps its programming ability and picks up
+your habits.
+
+**LoRA (Low-Rank Adaptation).** Fine-tuning all 494M weights needs far more than
+6 GB of GPU memory (weights, gradients and optimizer state for each). LoRA
+freezes the original weights and learns a small correction for each attention
+and MLP matrix `W`:
+
+```
+W' = W + (alpha / r) · B · A        A: r × d_in,  B: d_out × r,  r = 16
+```
+
+Because `r` is tiny compared with `d` (16 vs 896), `A` and `B` together have
+far fewer numbers than `W`. Only they are trained: **8.8M parameters, 1.7% of the
+model**. The result is a small (tens of MB) "adapter" saved in `private/style_adapter/` that
+is applied on top of the unchanged base model.
+
+**What the script does:**
+1. Walks your code folder recursively, keeping common source files and skipping
+   `node_modules`, `.git`, virtual environments, build output, minified files,
+   files over 200 KB, and credential files such as `.env`.
+2. Joins all files (each headed by its relative path) and cuts them into
+   512-token blocks. 5% are held out for validation.
+3. Trains with AdamW (lr 2e-4, warmup + cosine decay), batch 4 × gradient
+   accumulation 4 (= effective batch of 16), bfloat16, and **gradient checkpointing**
+   (recompute activations during the backward pass instead of storing them, which
+   trades speed for memory).
+4. Saves the adapter whenever validation loss improves, just like `train.py`.
+
+**Test run** (30 steps on this project's own 7 Python files):
+validation loss went from 3.17 to 2.95, and the completions visibly changed style.
+For `def get_batch(split):`, the base model wrote a long Google-style docstring;
+the fine-tuned model wrote a short inline `#` comment, the way this project does.
+Use `--compare` (or the checkbox on the web page) to see both side by side.
+
+**How much code:** aim for 100k+ tokens (roughly 300 KB of source). Default settings
+run 2 epochs; on the RTX 4050 each step (16 blocks) takes about 10 seconds.
+
+**Privacy:** a model fine-tuned on your code can reproduce pieces of it, including
+anything secret that slipped into the code. That is why the adapter lives in
+`private/`, and why credential files are skipped.
+
+---
+
+## 5d. Your notes: Retrieval-Augmented Generation (`notes_rag.py`)
+
+**Goal:** ask questions about yourself ("when is my dentist appointment?") and get
+correct answers, privately.
+
+**Why not train a model on your notes?** Training blends facts into millions of
+weights. Small models recall facts unreliably and confidently make up the rest;
+you can't delete a fact afterwards; and anyone who gets the weights can coax the
+secrets back out. **RAG** keeps the facts as plain files and looks them up at
+question time:
+
+```
+                  ┌──────────── indexing (once, and whenever a note changes) ─────────────┐
+ private/notes/*.md, *.txt → split into ~600-char chunks → bge-small → one 384-dim vector each
+                  └───────────────────────────────────────────────────────────────────────┘
+ question → bge-small → vector → cosine similarity with every chunk → top 4 chunks
+        → Qwen2.5-1.5B-Instruct: "answer ONLY from these notes, cite them" → answer + sources
+```
+
+**Embeddings.** `BAAI/bge-small-en-v1.5` (33M parameters) is trained so that texts with
+similar *meaning* get similar vectors, even with no words in common:
+"When do I see the dentist?" lands close to "Dentist appointment: Thursday 9 October".
+Vectors are normalised, so similarity is just a dot product (cosine similarity).
+
+**Generation.** `Qwen2.5-1.5B-Instruct` is an instruction-tuned chat model. The system
+prompt tells it to use only the provided notes, cite them, and say so when the
+answer isn't there. Decoding is greedy (no randomness) for faithful answers.
+
+**Staying up to date.** The index (`private/notes_index.pt`) stores each note's
+modification time. If you add, edit or delete a note, the next question rebuilds
+the index automatically (a few seconds).
+
+**Test results** on the fictional `examples/notes/`:
+
+| Question | Answer |
+|---|---|
+| When is my dentist appointment? | Thursday, 9 October 2026 at 10:30 AM. |
+| What medicine am I allergic to? | You are allergic to penicillin. |
+| Which days do I go to the gym? | Mondays, Wednesdays and Saturdays at 7 pm. |
+| What is my bank PIN? | I do not have information about your bank PIN in the given notes. |
+
+The last row is the important one: when the answer isn't in the notes, the model
+says so instead of inventing one.
+
+**Privacy.** Everything runs on the laptop; after the one-time model download, no
+data leaves it. Notes and the index live in `private/`, which is in `.gitignore`.
+
+**GPU memory.** The code model (~1 GB) and the answer model (~3 GB) don't comfortably
+fit in 6 GB alongside everything else, so the web app unloads one when you switch
+to the other mode (`free_gpu()` in `app.py`).
 
 ---
 

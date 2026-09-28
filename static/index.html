@@ -123,42 +123,75 @@
   }
   body.dragging #drop { display: grid; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+  /* ---- modes ---- */
+  nav.modes { display: flex; gap: 4px; margin-left: auto; background: var(--surface-2); border-radius: 10px; padding: 3px; }
+  nav.modes button {
+    border: 0; background: none; color: var(--muted); font: inherit; font-size: .875rem;
+    padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  }
+  nav.modes button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+  .msg.jo[data-mode="code"] .out { font: .875rem/1.55 ui-monospace, "Cascadia Code", Consolas, monospace; background: var(--surface-2); padding: 10px 12px; border-radius: 8px; }
+  .msg.jo[data-mode="notes"] .out { font: inherit; }
+  .sources { margin-top: 10px; font-size: .8125rem; color: var(--muted); }
+  .sources summary { cursor: pointer; }
+  .sources ol { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 6px; }
+  .sources pre { white-space: pre-wrap; background: var(--surface-2); padding: 6px 8px; border-radius: 6px; margin: 4px 0 0; color: var(--text); font: .8125rem/1.45 system-ui, sans-serif; }
+  .private { font-size: .75rem; color: var(--muted); margin: 6px 0 0; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <header>
   <h1>Jo</h1>
   <span id="status">connecting…</span>
+  <nav class="modes" aria-label="Mode">
+    <button type="button" data-mode="jo" aria-pressed="true">Shakespeare</button>
+    <button type="button" data-mode="code" aria-pressed="false">My code</button>
+    <button type="button" data-mode="notes" aria-pressed="false">My notes</button>
+  </nav>
 </header>
 
 <main id="log" aria-live="polite">
   <div class="empty" id="empty">
-    <strong>Jo writes like Shakespeare.</strong>
-    <p>Type the start of a scene, like <em>ROMEO:</em>, and Jo will continue it. You can also attach images, which a vision model describes in words for Jo, or text files, which Jo continues from.</p>
-    <p>Drag files anywhere onto the page, or use the paperclip.</p>
+    <strong id="empty-title"></strong>
+    <p id="empty-text"></p>
+    <p id="empty-extra"></p>
   </div>
 </main>
 
 <footer>
   <div id="pending"></div>
   <form class="composer" id="form">
-    <label class="icon-btn" title="Attach images or text files" style="display:grid;place-items:center">
+    <label class="icon-btn" id="attach" title="Attach images or text files" style="display:grid;place-items:center">
       📎<span class="sr-only">Attach files</span>
       <input type="file" id="file" multiple hidden
              accept="image/*,.txt,.md,.csv,.json,.py,.js,.html,.css,.log">
     </label>
-    <textarea id="prompt" rows="1" placeholder="ROMEO:" aria-label="Prompt for Jo"></textarea>
+    <textarea id="prompt" rows="1" aria-label="Prompt"></textarea>
     <button class="send" id="send" type="submit">Send</button>
   </form>
+  <p class="private" id="private-note" hidden>Runs entirely on this laptop. Nothing is sent to the internet.</p>
   <details class="settings">
     <summary>Generation settings</summary>
-    <div class="sliders">
+    <div class="sliders" data-for="jo">
       <label><span>Length (characters) <output id="o-tokens">400</output></span>
         <input type="range" id="tokens" min="50" max="2000" step="50" value="400"></label>
       <label><span>Temperature <output id="o-temperature">0.8</output></span>
         <input type="range" id="temperature" min="0.1" max="1.5" step="0.05" value="0.8"></label>
       <label><span>Top-k <output id="o-top_k">40</output></span>
         <input type="range" id="top_k" min="1" max="65" step="1" value="40"></label>
+    </div>
+    <div class="sliders" data-for="code" hidden>
+      <label><span>Length (tokens) <output id="o-code_tokens">200</output></span>
+        <input type="range" id="code_tokens" min="32" max="1024" step="16" value="200"></label>
+      <label><span>Temperature <output id="o-code_temperature">0.4</output></span>
+        <input type="range" id="code_temperature" min="0" max="1.2" step="0.05" value="0.4"></label>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="compare"> Also show the base model (before fine-tuning)</label>
+    </div>
+    <div class="sliders" data-for="notes" hidden>
+      <label><span>Note chunks to retrieve <output id="o-k">4</output></span>
+        <input type="range" id="k" min="1" max="10" step="1" value="4"></label>
     </div>
   </details>
 </footer>
@@ -168,33 +201,85 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const log = $("log"), form = $("form"), promptEl = $("prompt"), sendBtn = $("send"), pendingEl = $("pending");
-let pending = [];   // File objects waiting to be sent
+let pending = [];   // File objects waiting to be sent (Shakespeare mode only)
 let busy = false;
+let modesInfo = null;
+
+// ---------- modes ----------
+const MODES = {
+  jo: {
+    placeholder: "ROMEO:",
+    title: "Jo writes like Shakespeare.",
+    text: "Type the start of a scene, like ROMEO:, and Jo will continue it. You can also attach images, which a vision model describes in words for Jo, or text files, which Jo continues from.",
+    extra: () => "Drag files anywhere onto the page, or use the paperclip.",
+  },
+  code: {
+    placeholder: "def load_users(path):",
+    title: "Code in your style.",
+    text: "Start a function, class or file and a code model fine-tuned on your own projects completes it the way you would write it. Enter adds a new line; Ctrl+Enter sends.",
+    extra: () => modesInfo?.code
+      ? `Adapter trained on ${modesInfo.code.files} files (${modesInfo.code.tokens.toLocaleString()} tokens) on ${modesInfo.code.trained_at}.`
+      : "No adapter yet. Train one with: python code_style.py train --code_dir \"path\\to\\your\\code\"",
+  },
+  notes: {
+    placeholder: "When is my dentist appointment?",
+    title: "Ask your notes.",
+    text: "Questions are answered only from the .txt and .md files in your private notes folder, with the sources shown. Edit a note and the next answer uses the new version.",
+    extra: () => modesInfo ? `${modesInfo.notes.files} note file(s) in ${modesInfo.notes.dir}.` : "",
+  },
+};
+let mode = "jo";
+try { const saved = localStorage.getItem("jo-mode"); if (MODES[saved]) mode = saved; } catch {}
+
+function setMode(m) {
+  mode = m;
+  try { localStorage.setItem("jo-mode", m); } catch {}
+  for (const b of document.querySelectorAll("nav.modes button")) b.setAttribute("aria-pressed", String(b.dataset.mode === m));
+  for (const s of document.querySelectorAll(".sliders")) s.hidden = s.dataset.for !== m;
+  $("attach").hidden = m !== "jo";
+  $("private-note").hidden = m === "jo";
+  if (m !== "jo") { pending = []; renderPending(); }
+  promptEl.placeholder = MODES[m].placeholder;
+  renderEmpty();
+  promptEl.focus();
+}
+
+function renderEmpty() {
+  if (!$("empty")) return;
+  $("empty-title").textContent = MODES[mode].title;
+  $("empty-text").textContent = MODES[mode].text;
+  $("empty-extra").textContent = MODES[mode].extra();
+}
+
+for (const b of document.querySelectorAll("nav.modes button")) b.addEventListener("click", () => { if (!busy) setMode(b.dataset.mode); });
 
 // ---------- status ----------
 async function refreshStatus() {
   try {
-    const r = await fetch("/api/status");
+    const [r, m] = await Promise.all([fetch("/api/status"), fetch("/api/modes")]);
     const s = await r.json();
+    modesInfo = await m.json();
+    renderEmpty();
     const el = $("status");
     if (!s.ok) { el.textContent = s.error; el.className = "bad"; return; }
     el.className = "";
-    el.textContent = `${s.params_m}M parameters · trained ${s.iter} steps · val loss ${s.val_loss.toFixed(3)} · ${s.device}`;
+    el.textContent = `${s.params_m}M parameters · val loss ${s.val_loss.toFixed(3)} · ${s.device}`;
   } catch { $("status").textContent = "server offline"; $("status").className = "bad"; }
 }
 refreshStatus();
-setInterval(refreshStatus, 30000);  // picks up newer checkpoints while training runs
+setInterval(refreshStatus, 30000);
 
 // ---------- settings ----------
-for (const id of ["tokens", "temperature", "top_k"]) {
+for (const id of ["tokens", "temperature", "top_k", "code_tokens", "code_temperature", "k"]) {
   const input = $(id), out = $("o-" + id);
   input.addEventListener("input", () => { out.textContent = input.value; });
 }
 
-// ---------- attachments ----------
+// ---------- attachments (Shakespeare mode) ----------
 const isImage = (f) => f.type.startsWith("image/");
 
 function addFiles(list) {
+  if (mode !== "jo") return;
   for (const f of list) pending.push(f);
   renderPending();
 }
@@ -220,7 +305,7 @@ function renderPending() {
 $("file").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
 
 let dragDepth = 0;
-addEventListener("dragenter", (e) => { if (e.dataTransfer?.types.includes("Files")) { dragDepth++; document.body.classList.add("dragging"); } });
+addEventListener("dragenter", (e) => { if (mode === "jo" && e.dataTransfer?.types.includes("Files")) { dragDepth++; document.body.classList.add("dragging"); } });
 addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); } });
 addEventListener("dragover", (e) => e.preventDefault());
 addEventListener("drop", (e) => {
@@ -229,17 +314,42 @@ addEventListener("drop", (e) => {
 });
 promptEl.addEventListener("paste", (e) => {
   const files = [...e.clipboardData.files];
-  if (files.length) { e.preventDefault(); addFiles(files); }
+  if (files.length && mode === "jo") { e.preventDefault(); addFiles(files); }
 });
 
 // ---------- sending ----------
 // Enter sends, Shift+Enter adds a newline; skip while an IME is composing text.
+// In code mode Enter inserts a newline (code is multi-line) and Ctrl+Enter sends.
 promptEl.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" || e.shiftKey) return;
   if (e.isComposing || e.keyCode === 229) return;
+  if (mode === "code" && !(e.ctrlKey || e.metaKey)) return;
   e.preventDefault();
   form.requestSubmit();
 });
+
+async function stream(url, body, reply) {
+  const res = await fetch(url, { method: "POST", body });
+  if (!res.ok) throw new Error(`Server error ${res.status}`);
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += value;
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+      if (line) handleEvent(reply, JSON.parse(line));
+    }
+  }
+}
+
+function formData(fields) {
+  const body = new FormData();
+  for (const [k, v] of Object.entries(fields)) body.append(k, v);
+  return body;
+}
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -250,72 +360,82 @@ form.addEventListener("submit", async (e) => {
 
   $("empty")?.remove();
   addUserMessage(text, files);
-  const jo = addJoMessage();
   promptEl.value = ""; pending = []; renderPending();
   setBusy(true);
+  const m = mode;
 
-  const body = new FormData();
-  body.append("prompt", text);
-  for (const id of ["tokens", "temperature", "top_k"]) body.append(id, $(id).value);
-  for (const f of files) body.append("files", f, f.name);
-
-  try {
-    const res = await fetch("/api/generate", { method: "POST", body });
-    if (!res.ok) throw new Error(`Server error ${res.status}`);
-    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-    let buf = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += value;
-      let nl;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
-        if (line) handleEvent(jo, JSON.parse(line));
-      }
-    }
-  } catch (err) {
-    note(jo, `Something went wrong: ${err.message}`, true);
-  } finally {
-    jo.out.classList.remove("busy");
-    setBusy(false);
-    promptEl.focus();
+  const jobs = [];
+  if (m === "jo") {
+    const body = formData({ prompt: text, tokens: $("tokens").value, temperature: $("temperature").value, top_k: $("top_k").value });
+    for (const f of files) body.append("files", f, f.name);
+    jobs.push(["/api/generate", body, "JO"]);
+  } else if (m === "code") {
+    const fields = { prompt: text, tokens: $("code_tokens").value, temperature: $("code_temperature").value };
+    jobs.push(["/api/code", formData(fields), "YOUR STYLE"]);
+    if ($("compare").checked) jobs.push(["/api/code", formData({ ...fields, base: "1" }), "BASE MODEL (before fine-tuning)"]);
+  } else {
+    jobs.push(["/api/ask", formData({ prompt: text, k: $("k").value }), "FROM YOUR NOTES"]);
   }
+
+  for (const [url, body, label] of jobs) {
+    const reply = addReply(m, label);
+    if (m === "code") { const p = document.createElement("span"); p.className = "p"; p.textContent = text; reply.out.append(p); }
+    try { await stream(url, body, reply); }
+    catch (err) { note(reply, `Something went wrong: ${err.message}`, true); }
+    finally { reply.out.classList.remove("busy"); }
+  }
+  setBusy(false);
+  promptEl.focus();
 });
 
 function setBusy(b) { busy = b; sendBtn.disabled = b; sendBtn.textContent = b ? "Writing…" : "Send"; }
 
-function handleEvent(jo, ev) {
+function handleEvent(r, ev) {
   switch (ev.type) {
-    case "status": jo.status.textContent = ev.message; break;
+    case "status": r.status.textContent = ev.message; break;
+    case "info": note(r, ev.message); break;
     case "caption": {
       const row = document.createElement("div");
-      row.append(`🖼 ${ev.file}, the vision model sees: `);
+      row.append(`${ev.file}, the vision model sees: `);
       const q = document.createElement("q"); q.textContent = ev.caption; row.append(q);
-      jo.notes.append(row); jo.status.textContent = ""; break;
+      r.notes.append(row); r.status.textContent = ""; break;
     }
-    case "file": note(jo, `📄 Read ${ev.file} (${ev.chars.toLocaleString()} characters)`); break;
-    case "warning": note(jo, `⚠ ${ev.message}`, true); break;
-    case "error": note(jo, ev.message, true); break;
+    case "file": note(r, `Read ${ev.file} (${ev.chars.toLocaleString()} characters)`); break;
+    case "warning": note(r, ev.message, true); break;
+    case "error": note(r, ev.message, true); break;
     case "prompt": {
-      jo.status.textContent = "";
+      r.status.textContent = "";
       const d = document.createElement("details"); d.className = "seen";
       const extra = [ev.truncated && "cut to the last 256 characters", ev.dropped > 0 && `${ev.dropped} unknown characters removed`].filter(Boolean);
       d.innerHTML = `<summary>What Jo actually saw${extra.length ? " (" + extra.join(", ") + ")" : ""}</summary><pre></pre>`;
       d.querySelector("pre").textContent = ev.text;
-      jo.card.insertBefore(d, jo.out);
+      r.card.insertBefore(d, r.out);
       const p = document.createElement("span"); p.className = "p"; p.textContent = ev.text.trim() ? ev.text : "";
-      jo.out.append(p);
+      r.out.append(p);
       break;
     }
-    case "token": jo.out.append(ev.text); scrollDown(); break;
+    case "sources": {
+      const d = document.createElement("details"); d.className = "sources";
+      const s = document.createElement("summary");
+      s.textContent = ev.hits.length ? `Sources: ${[...new Set(ev.hits.map((h) => h.source))].join(", ")}` : "No matching notes";
+      const ol = document.createElement("ol");
+      for (const h of ev.hits) {
+        const li = document.createElement("li");
+        li.textContent = `${h.source} (similarity ${h.score})`;
+        const pre = document.createElement("pre"); pre.textContent = h.text; li.append(pre);
+        ol.append(li);
+      }
+      d.append(s, ol); r.card.append(d);
+      break;
+    }
+    case "token": r.out.append(ev.text); scrollDown(); break;
   }
 }
 
-function note(jo, text, warn = false) {
+function note(r, text, warn = false) {
   const row = document.createElement("div");
   if (warn) row.className = "warn";
-  row.textContent = text; jo.notes.append(row); jo.status.textContent = "";
+  row.textContent = text; r.notes.append(row); r.status.textContent = "";
 }
 
 function addUserMessage(text, files) {
@@ -332,10 +452,10 @@ function addUserMessage(text, files) {
   log.append(msg); scrollDown(true);
 }
 
-function addJoMessage() {
-  const msg = document.createElement("div"); msg.className = "msg jo";
+function addReply(m, label) {
+  const msg = document.createElement("div"); msg.className = "msg jo"; msg.dataset.mode = m;
   const card = document.createElement("div"); card.className = "card";
-  const who = document.createElement("div"); who.className = "who"; who.textContent = "JO";
+  const who = document.createElement("div"); who.className = "who"; who.textContent = label;
   const notes = document.createElement("div"); notes.className = "notes";
   const status = document.createElement("div"); notes.append(status);
   const out = document.createElement("div"); out.className = "out busy";
@@ -347,6 +467,8 @@ function scrollDown(force = false) {
   const nearBottom = force || log.scrollHeight - log.scrollTop - log.clientHeight < 120;
   if (nearBottom) log.scrollTop = log.scrollHeight;
 }
+
+setMode(mode);
 </script>
 </body>
 </html>

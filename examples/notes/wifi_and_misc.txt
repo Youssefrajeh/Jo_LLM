@@ -1,0 +1,5 @@
+Home Wi-Fi network name: SamHome-5G
+The router admin page is at 192.168.1.1.
+
+Gym schedule: Monday, Wednesday and Saturday at 7 pm.
+Mum's birthday is 3 March.

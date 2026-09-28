@@ -1,206 +1,166 @@
-<div align="center">
+# Jo
 
-# 🎭 Jo
+A small GPT-style language model implemented from scratch in PyTorch, trained on the works of Shakespeare, and served through a local web interface that accepts text, text files, and images.
 
-### *A language model, built from scratch, that dreams in iambic nonsense.*
+| | |
+|---|---|
+| Parameters | 10.8 million |
+| Architecture | Decoder-only Transformer (6 layers, 6 heads, 384-dim embeddings) |
+| Training data | Tiny Shakespeare (1.1 MB) |
+| Training time | ~12 minutes on an NVIDIA RTX 4050 Laptop GPU |
+| Pretrained weights | None (trained from random initialization) |
 
-**10.8 million parameters · one laptop GPU · ten minutes of training · zero pretrained weights**
+## Overview
 
-![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
-![PyTorch](https://img.shields.io/badge/PyTorch-from%20scratch-EE4C2C?logo=pytorch&logoColor=white)
-![Params](https://img.shields.io/badge/parameters-10.8M-8a3b2b)
-![Trained on](https://img.shields.io/badge/trained%20on-RTX%204050%20Laptop-76B900?logo=nvidia&logoColor=white)
-![Bard approved](https://img.shields.io/badge/the%20Bard-mostly%20confused-6b6258)
+Every large language model is trained on the same objective: given a sequence of text, predict the next token. Jo implements that objective end to end, with the same core architecture as GPT-2 and GPT-3 (token and position embeddings, stacked self-attention and MLP blocks, and a next-token output layer), at a scale small enough to train on a laptop and to read in full.
 
-</div>
+Sample output (prompt: `JULIET:\nO Romeo,`):
 
----
+```
+JULIET:
+O Romeo, death! what art thou of man?
+Ah, and how may she be not for a shoulder there
+To be obey'd with us, I will not speak to thee,
+Ere thou shalt do say thou be at great to change.
+```
 
-> ```
-> JULIET:
-> O Romeo, death! what art thou of man?
-> Ah, and how may she be not for a shoulder there
-> To be obey'd with us, I will not speak to thee,
-> Ere thou shalt do say thou be at great to change.
-> Come, come with words, come to me, my son,
-> ```
-> *— Jo, after ~4 minutes of training. Grammar: questionable. Drama: fully present.*
+The model reproduces the structure of the source text (speaker names, verse line breaks, archaic vocabulary) without any understanding of its meaning.
 
----
-
-## 📜 Dramatis Personae
-
-| | Character | Role in the play |
-|---|---|---|
-| 🧠 | **Jo** (`model.py`) | A GPT-style Transformer: 6 layers, 6 attention heads, 384-dimensional thoughts. Written line by line, no borrowed brains. |
-| ✂️ | **The Tokenizer** (`tokenizer.py`) | Chops text into 65 characters and back. Humble, but no one speaks without it. |
-| 🏋️ | **The Trainer** (`train.py`) | Shows Jo a million characters of Shakespeare and corrects every wrong guess, 5,000 times over. |
-| 🪶 | **The Scribe** (`generate.py`) | Asks Jo, again and again: *"and what comes next?"* |
-| 👁️ | **BLIP, a visiting seer** (`app.py`) | A pretrained vision model. Jo is blind, so BLIP looks at your pictures and describes them in words. |
-| 🌐 | **The Stage** (`static/index.html`) | A web page where you talk to Jo and hand it images and text files. |
-
----
-
-## 🎬 Act I: What is Jo?
-
-Every large language model, from GPT-4 to Claude, is at heart a machine that answers one question:
-
-<div align="center">
-
-### *"Given this text… what comes next?"*
-
-</div>
-
-Jo is that machine, built by hand and small enough to understand completely. It uses the same architecture as the giants (**embeddings → stacked self-attention + MLP blocks → next-token prediction**), just about **16,000× smaller than GPT-3**.
+## Architecture
 
 ```mermaid
 flowchart LR
-    A["'To be or not to b'"] --> B[Tokenizer<br/>chars → ids]
-    B --> C[Embeddings<br/>+ positions]
-    C --> D[Transformer Block ×6<br/>attention + MLP]
-    D --> E[Probabilities<br/>for 65 chars]
-    E --> F["'e' 🎯"]
-    F -. append & repeat .-> A
+    A[Input text] --> B[Character tokenizer]
+    B --> C[Token + position embeddings]
+    C --> D[Transformer block x6<br/>self-attention + MLP]
+    D --> E[LayerNorm + linear head]
+    E --> F[Next-character probabilities]
+    F -. sample, append, repeat .-> A
 ```
 
-| | **Jo** | GPT-2 small | GPT-3 |
+| | Jo | GPT-2 small | GPT-3 |
 |---|---|---|---|
 | Layers | 6 | 12 | 96 |
 | Attention heads | 6 | 12 | 96 |
 | Embedding size | 384 | 768 | 12,288 |
-| Context window | 256 chars | 1,024 tokens | 2,048 tokens |
-| Parameters | **10.8 M** | 124 M | 175 B |
-| Training hardware | one laptop | 32 TPUs | ~10,000 GPUs |
+| Context window | 256 characters | 1,024 tokens | 2,048 tokens |
+| Parameters | 10.8M | 124M | 175B |
 
----
+Implementation details:
 
-## 🎬 Act II: Summon Jo
+- Causal multi-head self-attention (PyTorch fused scaled dot-product attention)
+- Pre-LayerNorm residual blocks with GELU MLPs
+- Weight tying between the input embedding and output layer
+- AdamW with decoupled weight decay, linear warmup and cosine learning-rate decay
+- bfloat16 mixed precision and gradient clipping
+- Checkpointing on best validation loss
+
+## Getting Started
 
 ```bash
 git clone https://github.com/Youssefrajeh/Jo_LLM.git
 cd Jo_LLM
-pip install -r requirements.txt     # get the CUDA build of PyTorch from pytorch.org for GPU
+pip install -r requirements.txt
 ```
 
-A trained checkpoint is already included in `out/`, so Jo is ready to talk right away.
+For GPU support, install the CUDA build of PyTorch from [pytorch.org](https://pytorch.org). A trained checkpoint is included in `out/`, so no training is required to run the model.
 
-### 🌐 On the stage (the web app)
+### Web interface
 
 ```bash
 python app.py
 ```
 
-Open **http://127.0.0.1:5000**. Then:
+Then open http://127.0.0.1:5000. The interface supports:
 
-- ✍️ **Type** the start of a scene, like `ROMEO:`, and watch Jo continue it character by character
-- 🖼️ **Drop an image**: BLIP describes it (*"a woman sitting on the beach with her dog"*) and Jo takes the stage from there
-- 📄 **Drop a text file**: Jo continues from the end of it
-- 🎚️ **Adjust** length, temperature (how bold Jo is) and top-k (how many choices it considers)
-- 🔍 Expand **"What Jo actually saw"** to see the exact prompt the model received
+- Text prompts, with the generated output streamed as it is produced
+- Text file uploads, used as the prompt
+- Image uploads, converted to a caption by a vision model before being passed to Jo
+- Adjustable output length, temperature, and top-k sampling
+- An inspection panel showing the exact prompt the model received
 
-> The first time you send an image, the app downloads BLIP (~1 GB) from Hugging Face.
+The image captioning model (~1 GB) is downloaded from Hugging Face on first use.
 
-### 🪶 In the terminal
+### Command line
 
 ```bash
 python generate.py --prompt "ROMEO:" --tokens 500
-python generate.py --prompt "HAMLET:" --temperature 1.2     # bolder
-python generate.py --prompt "HAMLET:" --temperature 0.5     # safer
+python generate.py --prompt "HAMLET:" --temperature 0.5 --top_k 20
 ```
 
-### 🏋️ Train your own Jo
+### Training
 
 ```bash
-python train.py                                   # ~10 min on an RTX 4050
-python train.py --data my_diary.txt --out_dir out_diary
-python generate.py --out_dir out_diary            # Jo, but it writes like you
+python train.py                                    # default: Tiny Shakespeare, 5,000 steps
+python train.py --data corpus.txt --out_dir out_corpus
+python generate.py --out_dir out_corpus
 ```
 
----
+All hyperparameters (model size, context length, batch size, learning rate, dropout) are configurable via command-line arguments. See `python train.py --help`.
 
-## 🎬 Act III: The Education of Jo
+## Results
 
-Jo starts out knowing nothing. Its first loss is **4.30**, about what you'd expect from picking among 65 characters at random (ln 65 ≈ 4.17). Then it learns:
+| Step | Train loss | Validation loss |
+|---:|---:|---:|
+| 0 | 4.30 | 4.30 |
+| 500 | 1.53 | 1.71 |
+| 1,000 | 1.26 | 1.51 |
+| 1,750 | 1.09 | **1.46** (best) |
+| 3,000 | 0.84 | 1.54 |
+| 5,000 | 0.58 | 1.72 |
 
-| Step | Val loss | What Jo "knows" |
-|---:|---:|---|
-| 0 | 4.30 | Nothing. Pure noise. |
-| 50 | 2.49 | Spaces and common letters: `ANDIINI pro st theatar f y s y are ththe` |
-| 500 | 1.71 | Words, line breaks, `NAME:` headers |
-| **1750** | **1.46** ⭐ | Real words, meter, speakers, archaic grammar. **Best checkpoint.** |
-| 5000 | 1.72 ↑ | Overfitting: it memorizes the training text and does *worse* on unseen text |
+The initial loss matches uniform guessing over the 65-character vocabulary (ln 65 ≈ 4.17). Validation loss reached its minimum at step 1,750 and increased afterwards while training loss continued to fall, indicating overfitting on the 1.1 MB dataset. The included checkpoint is the step-1,750 model. The full log is in `train_log.txt`.
 
-That last row is a lesson in itself: **train loss kept dropping, but validation loss rose again**. `train.py` only saves the checkpoint when validation loss improves, so the Jo you get is the one that generalizes best, not the one that memorized the most.
+## Multimodal Input
 
----
-
-## 🎬 Act IV: Giving a Blind Poet Eyes
-
-Jo only understands text. So how does it "see" your photos?
+Jo is a text-only model. Images are handled by a separate pretrained captioning model, [BLIP](https://arxiv.org/abs/2201.12086) (`Salesforce/blip-image-captioning-base`), whose output is added to the prompt:
 
 ```mermaid
 flowchart LR
-    I[🖼️ Your image] --> V[BLIP<br/>vision model]
-    V --> Cap["'a woman sitting on<br/>the beach with her dog'"]
-    T[✍️ Your text] --> P[Prompt]
-    F[📄 Text files] --> P
-    Cap --> P
-    P --> J[🎭 Jo]
-    J --> O[Shakespearean<br/>continuation]
+    I[Image] --> V[BLIP captioning model]
+    V --> P[Combined prompt]
+    T[Text prompt] --> P
+    F[Text files] --> P
+    P --> J[Jo]
+    J --> O[Generated text]
 ```
 
-This **vision model → words → language model** pipeline is the simplest way to make a text model multimodal. Models like GPT-4o and Claude go further: they turn images into *embeddings* that the language model reads directly, without converting them to words first.
+This pipeline is the simplest way to extend a text model to images. Production multimodal models instead project image features directly into the language model's embedding space.
 
----
+## Limitations
 
-## 🎬 Act V: What Jo Is Not
+Jo models the surface statistics of its training text. It does not answer questions, follow instructions, or reason. The main differences from production language models are:
 
-Jo imitates Shakespeare's *style* without understanding a word of it. It can't answer questions, follow instructions or reason. Getting from Jo to a real assistant takes:
+1. Scale: billions of parameters trained on trillions of tokens
+2. Tokenization: subword (BPE) vocabularies rather than characters
+3. Architecture refinements: rotary position embeddings, RMSNorm, SwiGLU, grouped-query attention
+4. Post-training: supervised instruction tuning and reinforcement learning from human feedback
 
-1. **Scale**: billions of parameters and trillions of words
-2. **A better tokenizer**: BPE word-pieces instead of single characters
-3. **Architecture upgrades**: RoPE, RMSNorm, SwiGLU, grouped-query attention
-4. **Instruction tuning**: training on question → good-answer pairs
-5. **RLHF**: reinforcement learning from human feedback
-
-The foundation, though, is exactly what's in `model.py`.
-
-📖 **For the full walkthrough of every component, read [`EXPLANATION.md`](EXPLANATION.md).**
-
----
-
-## 🗂️ The Script (project layout)
+## Project Structure
 
 ```
 Jo_LLM/
-├── model.py          🧠 the Transformer (commented for study)
-├── tokenizer.py      ✂️ characters ↔ ids
-├── train.py          🏋️ training loop: AdamW, warmup + cosine LR, bf16, checkpoints
-├── generate.py       🪶 text generation from the command line
-├── app.py            🌐 Flask server: Jo + BLIP, streaming responses
-├── static/index.html 🎭 the web page
-├── data/input.txt    📚 Tiny Shakespeare (1.1 MB)
-├── out/              💾 trained checkpoint + vocabulary
-├── train_log.txt     📈 the training run, step by step
-└── EXPLANATION.md    📖 the full lesson
+├── model.py           Transformer implementation
+├── tokenizer.py       Character-level tokenizer
+├── train.py           Training loop
+├── generate.py        Command-line text generation
+├── app.py             Flask server (Jo + BLIP, streaming responses)
+├── static/index.html  Web interface
+├── data/input.txt     Training data
+├── out/               Trained checkpoint and vocabulary
+├── train_log.txt      Training log
+└── EXPLANATION.md     Detailed walkthrough of every component
 ```
 
----
+A step-by-step explanation of the tokenizer, attention mechanism, training procedure, and web application is available in [EXPLANATION.md](EXPLANATION.md).
 
-## 🙏 Curtain Call
+## References
 
-- Vaswani et al., [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762) (2017), the Transformer
-- Radford et al., [*Language Models are Unsupervised Multitask Learners*](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) (2019), GPT-2
-- Li et al., [*BLIP*](https://arxiv.org/abs/2201.12086) (2022), the seer who lends Jo its eyes
-- Andrej Karpathy's [nanoGPT](https://github.com/karpathy/nanoGPT) and *Let's build GPT*, which inspired this project's design
-- William Shakespeare, for the training data (unpaid)
+- Vaswani et al., [Attention Is All You Need](https://arxiv.org/abs/1706.03762), 2017
+- Radford et al., [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf), 2019
+- Li et al., [BLIP: Bootstrapping Language-Image Pre-training](https://arxiv.org/abs/2201.12086), 2022
+- Karpathy, [nanoGPT](https://github.com/karpathy/nanoGPT)
 
-<div align="center">
+## Author
 
----
-
-*"All the world's a stage, and all the men and women merely* ***tokens****."*
-
-**Built by Youssef Rajeh** · Emerging Technologies, Semester 6
-
-</div>
+Youssef Rajeh, Emerging Technologies, Semester 6
